@@ -3,6 +3,8 @@ package com.example.demo;
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
@@ -12,11 +14,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Map;
 
 import static java.math.BigDecimal.valueOf;
+import java.math.BigDecimal;
 import static java.util.Optional.ofNullable;
-
+@Slf4j
 @RestController
 public class BankAccountController implements ApplicationListener<ApplicationReadyEvent> {
 
@@ -58,11 +62,33 @@ public class BankAccountController implements ApplicationListener<ApplicationRea
             produces = "application/json")
     public ResponseEntity<Account> updateAccount(@RequestBody Account a) {
         meterRegistry.counter("update_account").increment();
+        if(theBank.get(a.getId()) != null){
+            log.info("Someone tried creating a user with id: " + a.getId() + " but that already exists");
+        }
         Account account = getOrCreateAccount(a.getId());
         account.setBalance(a.getBalance());
         account.setCurrency(a.getCurrency());
+        
         theBank.put(a.getId(), a);
+        log.info("Money in the bank: {}",theBank.values().stream().map(ac -> ac.getBalance()).reduce(BigDecimal.ZERO, BigDecimal::add).doubleValue());
         return new ResponseEntity<>(a, HttpStatus.OK);
+    }
+    
+    /**
+     * Gets all accounts
+     * @return
+     */
+     
+    @GetMapping(path = "/account", consumes = "application/json",
+            produces = "application/json")
+    public ResponseEntity<ArrayList<Account>> getAllAccounts(){
+        meterRegistry.counter("get_all_accounts").increment();
+        var list = new ArrayList<Account>();
+        for (Account account : theBank.values()) {
+            list.add(account);
+        }
+        
+        return new ResponseEntity<>(list, HttpStatus.OK);
     }
 
     /**
@@ -97,8 +123,8 @@ public class BankAccountController implements ApplicationListener<ApplicationRea
      */
     @Override
     public void onApplicationEvent(ApplicationReadyEvent applicationReadyEvent) {
-        Gauge.builder("account_count", theBank,
-                b -> b.values().size()).register(meterRegistry);
+        Gauge.builder("account_count", theBank, b -> b.values().size()).register(meterRegistry);
+        Gauge.builder("total_money", theBank, b ->  b.values().stream().map(account -> account.getBalance()).reduce(BigDecimal.ZERO, BigDecimal::add).doubleValue()).register(meterRegistry);
     }
 
     @ResponseStatus(code = HttpStatus.NOT_FOUND, reason = "account not found")
